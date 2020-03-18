@@ -63,11 +63,12 @@ async fn store(db: &DbPool, channel_id: &ChannelId, logger: &Logger, recorder: R
     }
 }
 
+
 impl EventAggregator {
     pub async fn record<'a, A: Adapter>(
         &self,
-        app: &'a Application<A>,
-        channel_id: &ChannelId,
+        app: &Application<A>,
+        channel: &Channel,
         session: Option<&Session>,
         events: &'a [Event],
     ) -> Result<(), ResponseError> {
@@ -76,21 +77,35 @@ impl EventAggregator {
         let dbpool = app.pool.clone();
         let redis = app.redis.clone();
         let logger = app.logger.clone();
+        let channel_id = channel.id;
+
+        check_access(
+            &app.redis,
+            session,
+            &app.config.ip_rate_limit,
+            &channel,
+            events,
+        )
+        .await
+        .map_err(|e| match e {
+            AccessError::OnlyCreatorCanCloseChannel | AccessError::ForbiddenReferrer => {
+                ResponseError::Forbidden(e.to_string())
+            }
+            AccessError::RulesError(error) => ResponseError::TooManyRequests(error),
+            AccessError::UnAuthenticated => ResponseError::Unauthorized,
+            _ => ResponseError::BadRequest(e.to_string()),
+        })?;
 
         let mut channel_recorder = self.recorder.write().await;
-        let record: &mut Record = match channel_recorder.get_mut(&channel_id) {
+
+        let record: &mut Record = match channel_recorder.get_mut(&channel.id) {
             Some(record) => record,
             None => {
                 // fetch channel
-                let channel = get_channel_by_id(&app.pool, &channel_id)
-                    .await?
-                    .ok_or_else(|| ResponseError::NotFound)?;
-
                 let withdraw_period_start = channel.spec.withdraw_period_start;
-                let channel_id = channel.id;
                 let record = Record {
-                    channel,
-                    aggregate: new_aggr(&channel_id),
+                    channel: channel.to_owned(),
+                    aggregate: new_aggr(&channel.id),
                 };
 
                 // insert into
@@ -123,23 +138,6 @@ impl EventAggregator {
                     .expect("should have aggr, we just inserted")
             }
         };
-
-        check_access(
-            &app.redis,
-            session,
-            &app.config.ip_rate_limit,
-            &record.channel,
-            events,
-        )
-        .await
-        .map_err(|e| match e {
-            AccessError::OnlyCreatorCanCloseChannel | AccessError::ForbiddenReferrer => {
-                ResponseError::Forbidden(e.to_string())
-            }
-            AccessError::RulesError(error) => ResponseError::TooManyRequests(error),
-            AccessError::UnAuthenticated => ResponseError::Unauthorized,
-            _ => ResponseError::BadRequest(e.to_string()),
-        })?;
 
         events
             .iter()

@@ -4,7 +4,7 @@ use futures::future::{BoxFuture, FutureExt};
 use hex::FromHex;
 use hyper::{Body, Request};
 use primitives::adapter::Adapter;
-use primitives::{ChannelId, ValidatorId};
+use primitives::{ChannelId, ValidatorId, Channel};
 use std::convert::TryFrom;
 
 /// channel_load & channel_if_exist
@@ -19,13 +19,36 @@ pub fn channel_load<'a, A: Adapter + 'static>(
             .ok_or_else(|| ResponseError::BadRequest("Route params not found".to_string()))?
             .get(0)
             .ok_or_else(|| ResponseError::BadRequest("No id".to_string()))?;
-
-        let channel_id = ChannelId::from_hex(id)
+        
+        let channel_id = ChannelId::from_hex(&id)
             .map_err(|_| ResponseError::BadRequest("Wrong Channel Id".to_string()))?;
-        let channel = get_channel_by_id(&app.pool, &channel_id)
+        
+        let channel = match redis::cmd("GET")
+            .arg(&id)
+            .query_async::<_, Option<String>>(&mut app.redis.clone())
             .await?
-            .ok_or_else(|| ResponseError::NotFound)?;
+            .and_then(|channel| serde_json::from_str::<Channel>(&channel).ok())
+        {
+            Some(channel) => channel,
+            None => {
+                // If there was a problem with the Session or the Token, this will error
+                // and a BadRequest response will be returned
+                let channel = get_channel_by_id(&app.pool, &channel_id)
+                .await?
+                .ok_or_else(|| ResponseError::NotFound)?;
 
+                // save the Adapter Session to Redis for the next request
+                // if serde errors on deserialization this will override the value inside
+                redis::cmd("SET")
+                    .arg(&id)
+                    .arg(serde_json::to_string(&channel)?)
+                    .query_async(&mut app.redis.clone())
+                    .await?;
+
+                channel
+            }
+        };
+        
         req.extensions_mut().insert(channel);
 
         Ok(req)

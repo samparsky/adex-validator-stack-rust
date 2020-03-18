@@ -177,7 +177,7 @@ impl<A: Adapter + 'static> Application<A> {
             (route, _) if route.starts_with("/analytics") => analytics_router(req, &self).await,
             // This is important becuase it prevents us from doing
             // expensive regex matching for routes without /channel
-            (path, _) if path.starts_with("/channel") => channels_router(req, &self).await,
+            (path, _) if path.starts_with("/channel") => channels_router(req, self).await,
             _ => Err(ResponseError::NotFound),
         }
         .unwrap_or_else(map_response_error);
@@ -342,6 +342,13 @@ async fn channels_router<A: Adapter + 'static>(
             .map_or("".to_string(), |m| m.as_str().to_string())]);
 
         req.extensions_mut().insert(param);
+
+        let req = match chain(req, app, vec![Box::new(channel_load)]).await {
+            Ok(req) => req,
+            Err(error) => {
+                return Err(error);
+            }
+        };
 
         insert_events(req, app).await
     } else {
