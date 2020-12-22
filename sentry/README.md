@@ -1,11 +1,19 @@
-# Sentry RestAPI
+# Sentry
 
-## Endpoints:
+## Development
 
-#### Do not require authentication, can be cached:
+### Migrations
+While you can create the migration files yourself, you can also use `migrant`
+to create them for you.
 
-The API documentation can be found on the [adex-validator](https://github.com/AdExNetwork/adex-validator/blob/master/docs/api.md).
-Currently implemented endpoints:
+#### Migrant
+1) In order to use `migrant` you need to first install it:
 
-- POST `/channel` - creates a new channel
-- GET `/channel/list` - get a list of all channels
+    * via cargo: `cargo install migrant --features postgres`
+    
+    (for more options see the [migrant homepage](https://github.com/jaemk/migrant))
+
+2) And setup the `Migrant.toml` file, a reference to which you can find
+in [Migrant.dist.toml](Migrant.dist.toml).
+
+For more information see [migrant homepage](https://github.com/jaemk/migrant).

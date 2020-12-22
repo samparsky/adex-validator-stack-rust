@@ -1,9 +1,9 @@
 [workspace]
 
 members = [
+    "primitives",
     "adapter",
-    "domain",
+    "adview-manager",
+    "validator_worker",
     "sentry",
-    "validator",
-    "memory-repository",
 ]
